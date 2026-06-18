@@ -67,3 +67,8 @@ venv.bak/
 
 # Scripts with secrets
 setup_github.py
+
+# Local databases and vector stores
+data_store/
+qdrant_db/
+
