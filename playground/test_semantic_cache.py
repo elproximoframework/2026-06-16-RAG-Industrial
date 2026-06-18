@@ -23,6 +23,18 @@ def test_semantic_cache():
     os.environ["SEMANTIC_CACHE_THRESHOLD"] = "0.95"
     os.environ["SEMANTIC_CACHE_TTL_DAYS"] = "7.0"
     
+    # Limpiar caché previa para asegurar que el test es idempotente
+    try:
+        from app.api.dependencies import initialize_pipeline
+        pipeline, _, _ = initialize_pipeline()
+        client_qdrant = pipeline.vector_store._get_client()
+        existing = [c.name for c in client_qdrant.get_collections().collections]
+        if "semantic_cache" in existing:
+            client_qdrant.delete_collection("semantic_cache")
+            print("Caché semántica previa eliminada para asegurar limpieza del test.")
+    except Exception as e:
+        print(f"No se pudo limpiar la caché previa (harmless): {e}")
+    
     with TestClient(app) as client:
         # Consulta 1: Primera vez (Cache Miss)
         query_1 = "funcionalidad de los pines B4, B5 del AD4086"
