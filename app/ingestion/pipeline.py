@@ -188,6 +188,7 @@ class IngestionPipeline:
                 "n_children": 0,
                 "duration_seconds": round(time.perf_counter() - start_time, 2),
                 "status": "empty_document",
+                "parent_ids": [],
             }
 
         # Detección del idioma a nivel de documento para optimizar llamadas redundantes
@@ -208,6 +209,7 @@ class IngestionPipeline:
                 "n_children": 0,
                 "duration_seconds": round(time.perf_counter() - start_time, 2),
                 "status": "no_chunks_generated",
+                "parent_ids": [],
             }
 
         # ----------------------------------------------------------------
@@ -254,6 +256,7 @@ class IngestionPipeline:
             "n_children": n_children,
             "duration_seconds": duration,
             "status": "ok",
+            "parent_ids": [pair.parent.id for pair in pairs],
         }
 
     def get_collection_info(self) -> Dict[str, Any]:

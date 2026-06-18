@@ -275,6 +275,41 @@ class VectorStoreManager:
         return response.points
 
 
+    def delete_by_source(self, source_path: str) -> int:
+        """
+        Elimina todos los vectores asociados a un documento origen.
+        
+        Parámetros
+        ----------
+        source_path : str
+            Ruta del archivo original tal como se guardó en metadatos ('source').
+            
+        Returns
+        -------
+        int
+            1 si la operación fue exitosa, 0 si falló.
+        """
+        client = self._get_client()
+        try:
+            delete_filter = qmodels.Filter(
+                must=[
+                    qmodels.FieldCondition(
+                        key="source",
+                        match=qmodels.MatchValue(value=source_path)
+                    )
+                ]
+            )
+            client.delete(
+                collection_name=self.collection_name,
+                points_selector=delete_filter
+            )
+            return 1
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Error al eliminar vectores de '{source_path}': {e}")
+            return 0
+
+
     def collection_info(self) -> Dict[str, Any]:
         """Devuelve información de la colección (puntos indexados, estado, etc.)."""
         client = self._get_client()

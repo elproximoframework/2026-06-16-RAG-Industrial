@@ -5,12 +5,15 @@ from typing import Dict, Any
 from app.api.schemas import (
     QueryRequest, QueryResponse, 
     IngestRequest, IngestResponse, 
-    HealthResponse, SourceNode, PipelineTrace
+    HealthResponse, SourceNode, PipelineTrace,
+    SyncDirRequest, SyncDirResponse
 )
 from app.api.dependencies import get_rag_pipeline, get_ingestion_pipeline, get_semantic_cache
 from app.retrieval.agentic_pipeline import AgenticRAGPipeline
 from app.ingestion.pipeline import IngestionPipeline
 from app.retrieval.cache import SemanticCache
+from app.ingestion.sync.orchestrator import IncrementalSyncOrchestrator
+
 
 router = APIRouter()
 
@@ -183,3 +186,46 @@ async def health_check(
         collection_name=collection_name,
         vector_count=vector_count
     )
+
+@router.post(
+    "/ingest/sync_dir",
+    response_model=SyncDirResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Sincronizar directorio de forma incremental",
+    description="Analiza un directorio completo, detecta cambios mediante ledger SQLite, y actualiza de manera eficiente vector store y doc store."
+)
+async def sync_directory_endpoint(
+    request: SyncDirRequest,
+    pipeline: IngestionPipeline = Depends(get_ingestion_pipeline)
+):
+    try:
+        base_metadata = {}
+        if request.project_id:
+            base_metadata["project_id"] = request.project_id
+        if request.doc_type:
+            base_metadata["doc_type"] = request.doc_type
+        if request.confidentiality:
+            base_metadata["confidentiality"] = request.confidentiality
+            
+        orchestrator = IncrementalSyncOrchestrator(pipeline=pipeline)
+        report = orchestrator.sync_directory(
+            directory_path=request.directory_path,
+            base_metadata=base_metadata
+        )
+        
+        return SyncDirResponse(
+            directory=report["directory"],
+            added_count=len(report["added"]),
+            updated_count=len(report["updated"]),
+            deleted_count=len(report["deleted"]),
+            skipped_count=report["skipped_count"],
+            status=report["status"]
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al sincronizar directorio: {str(e)}"
+        )
+

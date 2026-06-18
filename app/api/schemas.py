@@ -48,3 +48,18 @@ class HealthResponse(BaseModel):
     qdrant_connected: bool = Field(..., description="Conectividad con Qdrant.")
     collection_name: str = Field(..., description="Nombre de la colección activa.")
     vector_count: int = Field(..., description="Número total de vectores en la colección.")
+
+class SyncDirRequest(BaseModel):
+    directory_path: str = Field(..., description="Ruta absoluta o relativa al directorio local a sincronizar.")
+    project_id: Optional[str] = Field(None, description="ID del proyecto asociado para pre-metadatos.")
+    doc_type: Optional[str] = Field(None, description="Tipo de documento por defecto.")
+    confidentiality: Optional[str] = Field(None, description="Nivel de confidencialidad por defecto.")
+
+class SyncDirResponse(BaseModel):
+    directory: str = Field(..., description="Directorio sincronizado.")
+    added_count: int = Field(..., description="Número de nuevos archivos ingeridos.")
+    updated_count: int = Field(..., description="Número de archivos actualizados.")
+    deleted_count: int = Field(..., description="Número de archivos obsoletos eliminados.")
+    skipped_count: int = Field(..., description="Número de archivos omitidos sin cambios.")
+    status: str = Field(..., description="Estado del proceso (success, partial_errors, etc.).")
+

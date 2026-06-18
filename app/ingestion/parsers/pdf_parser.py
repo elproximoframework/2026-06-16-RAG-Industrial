@@ -41,7 +41,21 @@ class MarkerPDFParser(BaseParser):
         return self._converter
 
     def parse(self, file_path: str) -> str:
+        import logging
+        logger = logging.getLogger("app.ingestion.parsers.pdf_parser")
+        
+        from pathlib import Path
+        pdf_path = Path(file_path)
+        md_path = pdf_path.with_suffix(".md")
+        
+        # Si existe el archivo Markdown homónimo, omitimos la inicialización y uso de Marker.
+        if md_path.exists():
+            logger.info(f"Detectado archivo pre-parseado '{md_path.name}'. Leyendo contenido directamente del disco.")
+            return md_path.read_text(encoding="utf-8")
+            
+        logger.info(f"No se detectó pre-parseo para '{pdf_path.name}'. Ejecutando Marker converter (este paso requiere GPU/RAM y puede demorar)...")
         converter = self._get_converter()
         rendered = converter(file_path)
         return rendered.markdown
+
 
