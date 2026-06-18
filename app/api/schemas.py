@@ -20,6 +20,8 @@ class PipelineTrace(BaseModel):
     use_hyde: bool = Field(..., description="Indica si se utilizó HyDE (Hypothetical Document Embeddings).")
     use_multiquery: bool = Field(..., description="Indica si se utilizó Multi-Query Expansion.")
     compression_applied: bool = Field(..., description="Indica si se aplicó compresión contextual.")
+    cache_hit: bool = Field(..., description="Indica si la respuesta proviene de la caché semántica.")
+    cache_similarity: Optional[float] = Field(None, description="Similitud semántica calculada para el cache hit.")
 
 class QueryResponse(BaseModel):
     query: str = Field(..., description="La consulta original.")

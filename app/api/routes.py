@@ -7,9 +7,10 @@ from app.api.schemas import (
     IngestRequest, IngestResponse, 
     HealthResponse, SourceNode, PipelineTrace
 )
-from app.api.dependencies import get_rag_pipeline, get_ingestion_pipeline
+from app.api.dependencies import get_rag_pipeline, get_ingestion_pipeline, get_semantic_cache
 from app.retrieval.agentic_pipeline import AgenticRAGPipeline
 from app.ingestion.pipeline import IngestionPipeline
+from app.retrieval.cache import SemanticCache
 
 router = APIRouter()
 
@@ -22,10 +23,46 @@ router = APIRouter()
 )
 async def query_rag(
     request: QueryRequest,
-    rag: AgenticRAGPipeline = Depends(get_rag_pipeline)
+    rag: AgenticRAGPipeline = Depends(get_rag_pipeline),
+    cache: SemanticCache = Depends(get_semantic_cache)
 ):
     try:
-        # Ejecutar consulta a través del orquestador agéntico
+        # 1. Comprobar caché semántica
+        cache_hit = cache.check(request.query)
+        if cache_hit is not None:
+            cached_result = cache_hit["response"]
+            similarity = cache_hit["similarity"]
+            
+            # Re-mapear las fuentes a la estructura de SourceNode de Pydantic
+            sources = [
+                SourceNode(
+                    id=s["id"],
+                    document=s["document"],
+                    heading=s.get("heading"),
+                    content_snippet=s["content_snippet"],
+                    compressed=s["compressed"]
+                )
+                for s in cached_result.get("sources", [])
+            ]
+            
+            trace = PipelineTrace(
+                retrieved_chunks=cached_result["pipeline_trace"]["retrieved_chunks"],
+                use_hyde=cached_result["pipeline_trace"]["use_hyde"],
+                use_multiquery=cached_result["pipeline_trace"]["use_multiquery"],
+                compression_applied=cached_result["pipeline_trace"]["compression_applied"],
+                cache_hit=True,
+                cache_similarity=similarity
+            )
+            
+            return QueryResponse(
+                query=request.query,
+                category=cached_result["category"],
+                answer=cached_result["answer"],
+                sources=sources,
+                pipeline_trace=trace
+            )
+            
+        # 2. Cache Miss: Ejecutar consulta a través del orquestador agéntico
         result = rag.query(request.query, filters=request.filters)
         
         # Mapear las fuentes a la estructura de SourceNode de Pydantic
@@ -45,8 +82,13 @@ async def query_rag(
             retrieved_chunks=result["pipeline_trace"]["retrieved_chunks"],
             use_hyde=result["pipeline_trace"]["use_hyde"],
             use_multiquery=result["pipeline_trace"]["use_multiquery"],
-            compression_applied=result["pipeline_trace"]["compression_applied"]
+            compression_applied=result["pipeline_trace"]["compression_applied"],
+            cache_hit=False,
+            cache_similarity=None
         )
+        
+        # 3. Registrar en la caché semántica para futuras consultas
+        cache.update(request.query, result)
         
         return QueryResponse(
             query=result["query"],
@@ -55,6 +97,7 @@ async def query_rag(
             sources=sources,
             pipeline_trace=trace
         )
+
         
     except Exception as e:
         raise HTTPException(

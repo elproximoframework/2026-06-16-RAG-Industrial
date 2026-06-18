@@ -22,9 +22,10 @@ async def lifespan(app: FastAPI):
     """
     logger.info("Iniciando carga de modelos RAG y conexiones en memoria...")
     try:
-        pipeline, rag = initialize_pipeline()
+        pipeline, rag, cache = initialize_pipeline()
         app.state.ingestion_pipeline = pipeline
         app.state.rag_pipeline = rag
+        app.state.semantic_cache = cache
         logger.info("Modelos cargados e inicializados con éxito. Servidor listo.")
     except Exception as e:
         logger.critical(f"Fallo crítico al inicializar el RAG Pipeline en startup: {e}", exc_info=True)

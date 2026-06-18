@@ -6,13 +6,14 @@ from fastapi import Request
 from app.ingestion.pipeline import IngestionPipeline
 from app.retrieval.engine import RetrievalEngine
 from app.retrieval.agentic_pipeline import AgenticRAGPipeline
+from app.retrieval.cache import SemanticCache
 
 ROOT = Path(__file__).parent.parent.parent
 
-def initialize_pipeline() -> tuple[IngestionPipeline, AgenticRAGPipeline]:
+def initialize_pipeline() -> tuple[IngestionPipeline, AgenticRAGPipeline, SemanticCache]:
     """
-    Inicializa una única vez los modelos y la base de datos (Qdrant + SQLite + SQLite FTS/BM25)
-    y retorna la instancia de IngestionPipeline y AgenticRAGPipeline.
+    Inicializa una única vez los modelos, la base de datos (Qdrant + SQLite + SQLite FTS/BM25)
+    y la caché semántica, retornando las instancias del pipeline, orquestador y caché.
     """
     # Cargar variables de entorno
     load_dotenv(dotenv_path=ROOT / ".env")
@@ -58,7 +59,10 @@ def initialize_pipeline() -> tuple[IngestionPipeline, AgenticRAGPipeline]:
     engine = RetrievalEngine(pipeline=pipeline, api_key=api_key)
     rag = AgenticRAGPipeline(retrieval_engine=engine, api_key=api_key)
     
-    return pipeline, rag
+    # 4. Inicializar la Caché Semántica
+    cache = SemanticCache(pipeline=pipeline)
+    
+    return pipeline, rag, cache
 
 def get_rag_pipeline(request: Request) -> AgenticRAGPipeline:
     """Dependency provider para el orquestador RAG."""
@@ -67,3 +71,8 @@ def get_rag_pipeline(request: Request) -> AgenticRAGPipeline:
 def get_ingestion_pipeline(request: Request) -> IngestionPipeline:
     """Dependency provider para el pipeline de ingesta."""
     return request.app.state.ingestion_pipeline
+
+def get_semantic_cache(request: Request) -> SemanticCache:
+    """Dependency provider para la caché semántica."""
+    return request.app.state.semantic_cache
+
