@@ -63,3 +63,21 @@ class SyncDirResponse(BaseModel):
     skipped_count: int = Field(..., description="Número de archivos omitidos sin cambios.")
     status: str = Field(..., description="Estado del proceso (success, partial_errors, etc.).")
 
+class EvaluationRequest(BaseModel):
+    golden_dataset_path: Optional[str] = Field(None, description="Ruta personalizada al dataset de referencia en formato JSON.")
+    output_csv_path: Optional[str] = Field(None, description="Ruta de salida personalizada para guardar el archivo de resultados CSV.")
+
+class MetricScores(BaseModel):
+    faithfulness: float = Field(..., description="Fidelidad de las respuestas (evitación de alucinaciones).")
+    answer_relevancy: float = Field(..., description="Relevancia de la respuesta respecto a la consulta del usuario.")
+    context_precision: float = Field(..., description="Precisión del contexto recuperado.")
+    context_recall: float = Field(..., description="Cobertura del contexto recuperado respecto a la referencia humana.")
+
+class EvaluationResponse(BaseModel):
+    status: str = Field(..., description="Estado del proceso de evaluación (success o failed).")
+    message: str = Field(..., description="Detalles o mensajes del proceso de validación.")
+    scores: Optional[MetricScores] = Field(None, description="Resultados promediados de las 4 métricas calculadas por RAGAS.")
+    output_file: Optional[str] = Field(None, description="Ruta física del archivo CSV con los resultados detallados.")
+    duration_seconds: float = Field(..., description="Tiempo total empleado en segundos.")
+
+

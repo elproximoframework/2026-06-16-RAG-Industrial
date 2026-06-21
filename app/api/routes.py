@@ -6,7 +6,8 @@ from app.api.schemas import (
     QueryRequest, QueryResponse, 
     IngestRequest, IngestResponse, 
     HealthResponse, SourceNode, PipelineTrace,
-    SyncDirRequest, SyncDirResponse
+    SyncDirRequest, SyncDirResponse,
+    EvaluationRequest, EvaluationResponse, MetricScores
 )
 from app.api.dependencies import get_rag_pipeline, get_ingestion_pipeline, get_semantic_cache
 from app.retrieval.agentic_pipeline import AgenticRAGPipeline
@@ -227,5 +228,160 @@ async def sync_directory_endpoint(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error al sincronizar directorio: {str(e)}"
+        )
+
+@router.post(
+    "/eval/run",
+    response_model=EvaluationResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Ejecutar evaluación con RAGAS",
+    description="Corre el golden dataset de preguntas técnicas contra el pipeline RAG y calcula métricas de fidelidad y cobertura usando Gemini."
+)
+async def run_evaluation_endpoint(
+    request: EvaluationRequest,
+    rag: AgenticRAGPipeline = Depends(get_rag_pipeline)
+):
+    start_time = time.perf_counter()
+    try:
+        # Importaciones locales diferidas
+        import os
+        import json
+        import pandas as pd
+        from pathlib import Path
+        import sys
+        import types
+        try:
+            from langchain_google_vertexai import ChatVertexAI
+            mod = types.ModuleType("vertexai")
+            mod.ChatVertexAI = ChatVertexAI
+            sys.modules["langchain_community.chat_models.vertexai"] = mod
+        except ImportError:
+            pass
+        from google import genai
+        from datasets import Dataset
+        from ragas import evaluate
+        from ragas.llms import llm_factory
+        from ragas.embeddings.google_provider import GoogleEmbeddings
+        from ragas.metrics import faithfulness, answer_relevancy, context_precision, context_recall
+
+        # 1. Rutas
+        ROOT = Path(__file__).parent.parent.parent
+        ds_path = ROOT / (request.golden_dataset_path or "data/golden_dataset.json")
+        csv_out_path = ROOT / (request.output_csv_path or "playground/evaluation_results.csv")
+
+        if not ds_path.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No se encontró el Golden Dataset en la ruta especificada: {ds_path}"
+            )
+
+        # 2. Cargar Golden Dataset
+        with open(ds_path, "r", encoding="utf-8") as f:
+            golden_data = json.load(f)
+
+        # 3. Recopilar respuestas
+        questions, answers, contexts_list, ground_truths = [], [], [], []
+
+        for item in golden_data:
+            q = item["question"]
+            gt = item["ground_truth"]
+            
+            # Ejecutar consulta en pipeline
+            result = rag.query(q)
+            
+            questions.append(q)
+            answers.append(result["answer"])
+            contexts_list.append(result["pipeline_trace"].get("contexts", []))
+            ground_truths.append(gt)
+
+        # 4. Construir Dataset
+        data_dict = {
+            "question": questions,
+            "answer": answers,
+            "contexts": contexts_list,
+            "ground_truth": ground_truths
+        }
+        dataset = Dataset.from_dict(data_dict)
+
+        # 5. Inicializar evaluadores
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Variable GEMINI_API_KEY no configurada en el entorno."
+            )
+
+        client = genai.Client(api_key=api_key)
+        evaluator_llm = llm_factory(
+            model="gemini-3.5-flash",
+            provider="google",
+            client=client
+        )
+        evaluator_embeddings = GoogleEmbeddings(
+            client=client,
+            model="gemini-embedding-2"
+        )
+        # Hack to resolve AttributeError: 'GoogleEmbeddings' object has no attribute 'embed_query'
+        evaluator_embeddings.embed_query = evaluator_embeddings.embed_text
+        evaluator_embeddings.embed_documents = evaluator_embeddings.embed_texts
+
+        # 6. Evaluar
+        results = evaluate(
+            dataset=dataset,
+            metrics=[
+                faithfulness,
+                answer_relevancy,
+                context_precision,
+                context_recall
+            ],
+            llm=evaluator_llm,
+            embeddings=evaluator_embeddings
+        )
+
+        # 7. Guardar en CSV
+        df_results = results.to_pandas()
+        df_results.to_csv(csv_out_path, index=False, encoding="utf-8")
+
+        duration = time.perf_counter() - start_time
+
+        def safe_float(val) -> float:
+            try:
+                if val is None or pd.isna(val):
+                    return 0.0
+                return float(val)
+            except Exception:
+                return 0.0
+
+        import pandas as pd
+        scores = MetricScores(
+            faithfulness=safe_float(df_results["faithfulness"].mean() if "faithfulness" in df_results else 0.0),
+            answer_relevancy=safe_float(df_results["answer_relevancy"].mean() if "answer_relevancy" in df_results else 0.0),
+            context_precision=safe_float(df_results["context_precision"].mean() if "context_precision" in df_results else 0.0),
+            context_recall=safe_float(df_results["context_recall"].mean() if "context_recall" in df_results else 0.0)
+        )
+
+        # Gatekeeping check
+        CRITICAL_HAL_THRESHOLD = 0.95
+        if scores.faithfulness < CRITICAL_HAL_THRESHOLD:
+            return EvaluationResponse(
+                status="failed",
+                message=f"Fallo de validación de calidad: fidelidad ({scores.faithfulness:.4f}) por debajo de {CRITICAL_HAL_THRESHOLD:.2f}",
+                scores=scores,
+                output_file=str(csv_out_path),
+                duration_seconds=duration
+            )
+
+        return EvaluationResponse(
+            status="success",
+            message="Evaluación de RAGAS completada exitosamente. El pipeline cumple los criterios de calidad.",
+            scores=scores,
+            output_file=str(csv_out_path),
+            duration_seconds=duration
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error en la ejecución de la evaluación de RAGAS: {str(e)}"
         )
 

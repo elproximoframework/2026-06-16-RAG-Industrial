@@ -122,6 +122,7 @@ class AgenticRAGPipeline:
                 "retrieved_chunks": len(parents),
                 "use_hyde": use_hyde,
                 "use_multiquery": use_multiquery,
-                "compression_applied": True
+                "compression_applied": True,
+                "contexts": [chunk.content for chunk in compressed_parents]
             }
         }
